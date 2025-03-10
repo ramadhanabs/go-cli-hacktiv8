@@ -7,20 +7,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"go-cli-hacktiv8/weather-cli/pkg"
-	"io/ioutil"
+	"io"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/briandowns/spinner"
 	"github.com/spf13/cobra"
 )
-
-type WeatherResponse struct {
-	CurrentWeather struct {
-		Temperature float64 `json:"temperature"`
-		WindSpeed   float64 `json:"windspeed"`
-	} `json:"current_weather"`
-}
 
 // fetchCmd represents the fetch command
 var fetchCmd = &cobra.Command{
@@ -41,11 +35,11 @@ to quickly create a Cobra application.`,
 			return
 		}
 
-		fetchWeather(cityName)
+		retrieveWeather(cityName)
 	},
 }
 
-func fetchWeather(city string) {
+func fetchWeather(city string) (pkg.WeatherResponse, error) {
 	s := spinner.New(spinner.CharSets[4], 100*time.Millisecond)
 	s.Suffix = " Fetching weather data..."
 	s.Start()
@@ -53,36 +47,90 @@ func fetchWeather(city string) {
 	cities := pkg.NewCities("./cities.json")
 	coordinates, err := cities.GetCoordinateByCity(city)
 	if err != nil {
-		fmt.Printf("Error: %s", err)
-		return
+		return pkg.WeatherResponse{}, err
 	}
 
 	url := fmt.Sprintf("https://api.open-meteo.com/v1/forecast?latitude=%f&longitude=%f&current_weather=true", coordinates.Lat, coordinates.Lon)
 
 	resp, err := http.Get(url)
 	if err != nil {
-		fmt.Printf("Error: %s", err)
-		return
+		return pkg.WeatherResponse{}, err
 	}
 	defer resp.Body.Close()
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Printf("Error: %s", err)
-		return
+		return pkg.WeatherResponse{}, err
 	}
 
-	var weather WeatherResponse
+	var weather pkg.WeatherResponse
 	if err := json.Unmarshal(body, &weather); err != nil {
-		fmt.Printf("Error: %s", err)
-		return
+		return pkg.WeatherResponse{}, err
 	}
+
 	s.Stop()
 
-	fmt.Println("✅ Weather data fetched successfully!")
-	fmt.Printf("City: %s \n", city)
-	fmt.Printf("Temperature: %f \n", weather.CurrentWeather.Temperature)
-	fmt.Printf("Wind Speed: %f \n", weather.CurrentWeather.WindSpeed)
+	return weather, nil
+}
+
+func retrieveWeather(city string) {
+	currentDate := time.Now().Format("02012006")
+	cacheFilePath := fmt.Sprintf("./cache_%s.json", currentDate)
+
+	cacheExists := fileExists(cacheFilePath)
+	cache := pkg.NewCachedCities(cacheFilePath)
+
+	if cacheExists {
+		if cacheExists {
+			if weather, err := cache.GetWeatherDataByCity(city); err == nil {
+				fmt.Println("✅ Weather data fetched from cache successfully!")
+				printWeather(city, weather)
+				return
+			}
+		}
+	}
+
+	// fetch weather
+	weather, err := fetchWeather(city)
+	if err != nil {
+		fmt.Printf("❌ Error fetching weather: %v\n", err)
+		return
+	}
+
+	if cacheExists {
+		if err := cache.AddWeather(city, weather); err != nil {
+			fmt.Printf("❌ Error updating cache: %v\n", err)
+		}
+	} else {
+		saveNewCacheFile(cacheFilePath, city, weather)
+	}
+
+	fmt.Println("✅ Weather data fetched from API successfully!")
+	printWeather(city, weather)
+}
+
+func saveNewCacheFile(filename, city string, weather pkg.WeatherResponse) {
+	weatherData := map[string]pkg.WeatherResponse{city: weather}
+	data, err := json.MarshalIndent(weatherData, "", "  ")
+	if err != nil {
+		fmt.Printf("❌ Failed to encode JSON: %v\n", err)
+		return
+	}
+
+	if err := os.WriteFile(filename, data, 0644); err != nil {
+		fmt.Printf("❌ Failed to write cache file: %v\n", err)
+	}
+}
+
+func fileExists(filename string) bool {
+	_, err := os.Stat(filename)
+	return !os.IsNotExist(err)
+}
+
+func printWeather(city string, weather pkg.WeatherResponse) {
+	fmt.Printf("🌍 City: %s\n", city)
+	fmt.Printf("🌡️ Temperature: %.2f°C\n", weather.CurrentWeather.Temperature)
+	fmt.Printf("💨 Wind Speed: %.2f km/h\n", weather.CurrentWeather.WindSpeed)
 }
 
 func init() {
