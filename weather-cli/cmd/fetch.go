@@ -78,15 +78,15 @@ func retrieveWeather(city string) {
 	cacheFilePath := fmt.Sprintf("./cache_%s.json", currentDate)
 
 	cacheExists := fileExists(cacheFilePath)
-	cache := pkg.NewCachedCities(cacheFilePath)
+
+	var cache *pkg.CachedCity
 
 	if cacheExists {
-		if cacheExists {
-			if weather, err := cache.GetWeatherDataByCity(city); err == nil {
-				fmt.Println("✅ Weather data fetched from cache successfully!")
-				printWeather(city, weather)
-				return
-			}
+		cache = pkg.NewCachedCities(cacheFilePath)
+		if weather, err := cache.GetWeatherDataByCity(city); err == nil {
+			fmt.Println("✅ Weather data fetched from cache successfully!")
+			printWeather(city, weather)
+			return
 		}
 	}
 
